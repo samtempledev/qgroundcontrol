@@ -98,7 +98,7 @@ public:
 
     FactGroup* gpsRtkFactGroup(void)  { return _gpsRtkFactGroup; }
 
-    QTranslator& qgcTranslator(void) { return _QGCTranslator; }
+    QTranslator& qgcJSONTranslator(void) { return _qgcTranslatorJSON; }
 
     static QString cachedParameterMetaDataFile(void);
     static QString cachedAirframeMetaDataFile(void);
@@ -188,9 +188,9 @@ private:
     QList<QPair<int,QString>>   _missingParams;                                     ///< List of missing parameter component id:name
 
     QQmlApplicationEngine* _qmlAppEngine        = nullptr;
-    bool                _logOutput              = false;                    ///< true: Log Qt debug output to file
-    bool				_fakeMobile             = false;                    ///< true: Fake ui into displaying mobile interface
-    bool                _settingsUpgraded       = false;                    ///< true: Settings format has been upgrade to new version
+    bool                _logOutput              = false;    ///< true: Log Qt debug output to file
+    bool				_fakeMobile             = false;    ///< true: Fake ui into displaying mobile interface
+    bool                _settingsUpgraded       = false;    ///< true: Settings format has been upgrade to new version
     int                 _majorVersion           = 0;
     int                 _minorVersion           = 0;
     int                 _buildVersion           = 0;
@@ -199,8 +199,9 @@ private:
     QGCToolbox*         _toolbox                = nullptr;
     QQuickItem*         _mainRootWindow         = nullptr;
     bool                _bluetoothAvailable     = false;
-    QTranslator         _QGCTranslator;
-    QTranslator         _QGCTranslatorQt;
+    QTranslator         _qgcTranslatorSourceCode;           ///< translations for source code C++/Qml
+    QTranslator         _qgcTranslatorJSON;                 ///< translations for json files
+    QTranslator         _qgcTranslatorQtLibs;               ///< tranlsations for Qt libraries
     QLocale             _locale;
     bool                _error                  = false;
     QElapsedTimer       _msecsElapsedTime;
@@ -225,7 +226,7 @@ private:
         /*! Returns a signal index that is can be compared to QMetaCallEvent.signalId. */
         static int signalIndex(const QMetaMethod & method) {
             Q_ASSERT(method.methodType() == QMetaMethod::Signal);
-    #if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
+
             int index = -1;
             const QMetaObject * mobj = method.enclosingMetaObject();
             for (int i = 0; i <= method.methodIndex(); ++i) {
@@ -233,9 +234,6 @@ private:
                 ++ index;
             }
             return index;
-    #else
-            return method.methodIndex();
-    #endif
         }
     public:
         SignalList() {}

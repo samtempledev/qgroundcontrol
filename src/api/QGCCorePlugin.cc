@@ -339,8 +339,7 @@ bool QGCCorePlugin::overrideSettingsGroupVisibility(QString name)
 
 bool QGCCorePlugin::adjustSettingMetaData(const QString& settingsGroup, FactMetaData& metaData)
 {
-    if (settingsGroup != AppSettings::settingsGroup) {
-        // All changes refer to AppSettings
+    if (settingsGroup == AppSettings::settingsGroup) {
 #if !defined(QGC_ENABLE_PAIRING)
         //-- If we don't support pairing, disable it.
         if (metaData.name() == AppSettings::usePairingName) {
@@ -349,36 +348,28 @@ bool QGCCorePlugin::adjustSettingMetaData(const QString& settingsGroup, FactMeta
             return false;
         }
 #endif
-        return true;
+
+        //-- Default Palette
+        if (metaData.name() == AppSettings::indoorPaletteName) {
+            QVariant outdoorPalette;
+#if defined (__mobile__)
+            outdoorPalette = 0;
+#else
+            outdoorPalette = 1;
+#endif
+            metaData.setRawDefaultValue(outdoorPalette);
+            return true;
+        }
+
+#if defined (__mobile__)
+        if (metaData.name() == AppSettings::telemetrySaveName) {
+            // Mobile devices have limited storage so don't turn on telemtry saving by default
+            metaData.setRawDefaultValue(false);
+            return true;
+        }
+#endif
     }
 
-    //-- Default Palette
-    if (metaData.name() == AppSettings::indoorPaletteName) {
-        QVariant outdoorPalette;
-#if defined (__mobile__)
-        outdoorPalette = 0;
-#else
-        outdoorPalette = 1;
-#endif
-        metaData.setRawDefaultValue(outdoorPalette);
-        return true;
-        //-- Auto Save Telemetry Logs
-    } else if (metaData.name() == AppSettings::telemetrySaveName) {
-#if defined (__mobile__)
-        metaData.setRawDefaultValue(false);
-        return true;
-#else
-        metaData.setRawDefaultValue(true);
-        return true;
-#endif
-#if defined(__ios__)
-    } else if (metaData.name() == AppSettings::savePathName) {
-        QString appName = qgcApp()->applicationName();
-        QDir rootDir = QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
-        metaData.setRawDefaultValue(rootDir.filePath(appName));
-        return false;
-#endif
-    }
     return true; // Show setting in ui
 }
 
@@ -533,12 +524,7 @@ QString QGCCorePlugin::stableVersionCheckFileUrl() const
 #endif
 }
 
-QStringList QGCCorePlugin::startupPages()
-{
-    return { "/qml/QGroundControl/Specific/UnitsWizardPage.qml" };
-}
-
-const QVariantList &QGCCorePlugin::toolBarIndicators(void)
+const QVariantList& QGCCorePlugin::toolBarIndicators(void)
 {
     //-- Default list of indicators for all vehicles.
     if(_toolBarIndicatorList.size() == 0) {
@@ -547,4 +533,49 @@ const QVariantList &QGCCorePlugin::toolBarIndicators(void)
                                              });
     }
     return _toolBarIndicatorList;
+}
+
+QList<int> QGCCorePlugin::firstRunPromptStdIds(void)
+{
+    QList<int> rgStdIds = { unitsFirstRunPromptId, offlineVehicleFirstRunPromptId };
+    return rgStdIds;
+}
+
+QList<int> QGCCorePlugin::firstRunPromptCustomIds(void)
+{
+    return QList<int>();
+}
+
+QVariantList QGCCorePlugin::firstRunPromptsToShow(void)
+{
+    QList<int> rgIdsToShow;
+
+    rgIdsToShow.append(firstRunPromptStdIds());
+    rgIdsToShow.append(firstRunPromptCustomIds());
+
+    QList<int> rgAlreadyShownIds = AppSettings::firstRunPromptsIdsVariantToList(_toolbox->settingsManager()->appSettings()->firstRunPromptIdsShown()->rawValue());
+
+    for (int idToRemove: rgAlreadyShownIds) {
+        rgIdsToShow.removeOne(idToRemove);
+    }
+
+    QVariantList rgVarIdsToShow;
+    for (int id: rgIdsToShow) {
+        rgVarIdsToShow.append(id);
+    }
+
+    return rgVarIdsToShow;
+}
+
+QString QGCCorePlugin::firstRunPromptResource(int id)
+{
+    switch (id) {
+    case unitsFirstRunPromptId:
+        return "/FirstRunPromptDialogs/UnitsFirstRunPrompt.qml";
+    case offlineVehicleFirstRunPromptId:
+        return "/FirstRunPromptDialogs/OfflineVehicleFirstRunPrompt.qml";
+        break;
+    }
+
+    return QString();
 }

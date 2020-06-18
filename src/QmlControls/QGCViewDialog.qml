@@ -32,16 +32,13 @@ Item {
 
     function accept() {
         if (acceptAllowed) {
-            Qt.inputMethod.hide()
             hideDialog()
         }
     }
 
     function reject() {
         if (rejectAllowed) {
-            Qt.inputMethod.hide()
             hideDialog()
         }
     }
-
 }

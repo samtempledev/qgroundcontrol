@@ -164,7 +164,7 @@ QGCCameraControl::QGCCameraControl(const mavlink_camera_information_t *info, Veh
     _vendor = QString(reinterpret_cast<const char*>(info->vendor_name));
     _modelName = QString(reinterpret_cast<const char*>(info->model_name));
     int ver = static_cast<int>(_info.cam_definition_version);
-    _cacheFile.sprintf("%s/%s_%s_%03d.xml",
+    _cacheFile = QString::asprintf("%s/%s_%s_%03d.xml",
         qgcApp()->toolbox()->settingsManager()->appSettings()->parameterSavePath().toStdString().c_str(),
         _vendor.toStdString().c_str(),
         _modelName.toStdString().c_str(),
@@ -228,9 +228,7 @@ QGCCameraControl::firmwareVersion()
     int major = (_info.firmware_version >> 24) & 0xFF;
     int minor = (_info.firmware_version >> 16) & 0xFF;
     int build = _info.firmware_version & 0xFFFF;
-    QString ver;
-    ver.sprintf("%d.%d.%d", major, minor, build);
-    return ver;
+    return QString::asprintf("%d.%d.%d", major, minor, build);
 }
 
 //-----------------------------------------------------------------------------
@@ -1185,7 +1183,7 @@ QGCCameraControl::_requestAllParameters()
         &msg,
         static_cast<uint8_t>(_vehicle->id()),
         static_cast<uint8_t>(compID()));
-    _vehicle->sendMessageOnLink(_vehicle->priorityLink(), msg);
+    _vehicle->sendMessageOnLinkThreadSafe(_vehicle->priorityLink(), msg);
     qCDebug(CameraControlVerboseLog) << "Request all parameters";
 }
 
@@ -1276,17 +1274,26 @@ QGCCameraControl::_processConditionTest(const QString conditionTest)
     qCDebug(CameraControlVerboseLog) << "_processConditionTest(" << conditionTest << ")";
     int op = TEST_NONE;
     QStringList test;
+
+    auto split = [&conditionTest](const QString& sep ) {
+#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
+        return conditionTest.split(sep, QString::SkipEmptyParts);
+#else
+        return conditionTest.split(sep, Qt::SkipEmptyParts);
+#endif
+    };
+
     if(conditionTest.contains("!=")) {
-        test = conditionTest.split("!=", QString::SkipEmptyParts);
+        test = split("!=");
         op = TEST_NOT_EQUAL;
     } else if(conditionTest.contains("=")) {
-        test = conditionTest.split("=", QString::SkipEmptyParts);
+        test = split("=");
         op = TEST_EQUAL;
     } else if(conditionTest.contains(">")) {
-        test = conditionTest.split(">", QString::SkipEmptyParts);
+        test = split(">");
         op = TEST_GREATER;
     } else if(conditionTest.contains("<")) {
-        test = conditionTest.split("<", QString::SkipEmptyParts);
+        test = split("<");
         op = TEST_SMALLER;
     }
     if(test.size() == 2) {
@@ -1321,7 +1328,11 @@ QGCCameraControl::_processCondition(const QString condition)
     bool result = true;
     bool andOp  = true;
     if(!condition.isEmpty()) {
+#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
         QStringList scond = condition.split(" ", QString::SkipEmptyParts);
+#else
+        QStringList scond = condition.split(" ", Qt::SkipEmptyParts);
+#endif
         while(scond.size()) {
             QString test = scond.first();
             scond.removeFirst();

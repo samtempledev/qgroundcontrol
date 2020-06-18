@@ -487,6 +487,10 @@ public:
             FirmwarePluginManager*  firmwarePluginManager,
             JoystickManager*        joystickManager);
 
+    // Pass these into the offline constructor to create an offline vehicle which tracks the offline vehicle settings
+    static const MAV_AUTOPILOT    MAV_AUTOPILOT_TRACK = static_cast<MAV_AUTOPILOT>(-1);
+    static const MAV_TYPE         MAV_TYPE_TRACK = static_cast<MAV_TYPE>(-1);
+
     // The following is used to create a disconnected Vehicle for use while offline editing.
     Vehicle(MAV_AUTOPILOT           firmwareType,
             MAV_TYPE                vehicleType,
@@ -557,8 +561,6 @@ public:
     Q_PROPERTY(QString              formatedMessages        READ formatedMessages                                       NOTIFY formatedMessagesChanged)
     Q_PROPERTY(QString              formatedMessage         READ formatedMessage                                        NOTIFY formatedMessageChanged)
     Q_PROPERTY(QString              latestError             READ latestError                                            NOTIFY latestErrorChanged)
-    Q_PROPERTY(int                  joystickMode            READ joystickMode           WRITE setJoystickMode           NOTIFY joystickModeChanged)
-    Q_PROPERTY(QStringList          joystickModes           READ joystickModes                                          CONSTANT)
     Q_PROPERTY(bool                 joystickEnabled         READ joystickEnabled        WRITE setJoystickEnabled        NOTIFY joystickEnabledChanged)
     Q_PROPERTY(bool                 active                  READ active                 WRITE setActive                 NOTIFY activeChanged)
     Q_PROPERTY(int                  flowImageIndex          READ flowImageIndex                                         NOTIFY flowImageIndexChanged)
@@ -623,7 +625,7 @@ public:
     Q_PROPERTY(QString              hobbsMeter              READ hobbsMeter                                             NOTIFY hobbsMeterChanged)
     Q_PROPERTY(bool                 vtolInFwdFlight         READ vtolInFwdFlight        WRITE setVtolInFwdFlight        NOTIFY vtolInFwdFlightChanged)
     Q_PROPERTY(bool                 highLatencyLink         READ highLatencyLink                                        NOTIFY highLatencyLinkChanged)
-    Q_PROPERTY(bool                 supportsTerrainFrame    READ supportsTerrainFrame                                   NOTIFY capabilityBitsChanged)
+    Q_PROPERTY(bool                 supportsTerrainFrame    READ supportsTerrainFrame                                   NOTIFY firmwareTypeChanged)
     Q_PROPERTY(QString              priorityLinkName        READ priorityLinkName       WRITE setPriorityLinkByName     NOTIFY priorityLinkNameChanged)
     Q_PROPERTY(QVariantList         links                   READ links                                                  NOTIFY linksChanged)
     Q_PROPERTY(LinkInterface*       priorityLink            READ priorityLink                                           NOTIFY priorityLinkNameChanged)
@@ -805,25 +807,11 @@ public:
     QGeoCoordinate coordinate() { return _coordinate; }
     QGeoCoordinate armedPosition    () { return _armedPosition; }
 
-    typedef enum {
-        JoystickModeRC,         ///< Joystick emulates an RC Transmitter
-        JoystickModeAttitude,
-        JoystickModePosition,
-        JoystickModeForce,
-        JoystickModeVelocity,
-        JoystickModeMax
-    } JoystickMode_t;
-
     void updateFlightDistance(double distance);
 
-    int joystickMode();
-    void setJoystickMode(int mode);
-
-    /// List of joystick mode names
-    QStringList joystickModes();
-
-    bool joystickEnabled();
-    void setJoystickEnabled(bool enabled);
+    bool joystickEnabled            ();
+    void setJoystickEnabled         (bool enabled);
+    void sendJoystickDataThreadSafe (float roll, float pitch, float yaw, float thrust, quint16 buttons);
 
     // Is vehicle active with respect to current active vehicle in QGC
     bool active();
@@ -841,7 +829,7 @@ public:
 
     /// Sends a message to the specified link
     /// @return true: message sent, false: Link no longer connected
-    bool sendMessageOnLink(LinkInterface* link, mavlink_message_t message);
+    bool sendMessageOnLinkThreadSafe(LinkInterface* link, mavlink_message_t message);
 
     /// Sends the specified messages multiple times to the vehicle in order to attempt to
     /// guarantee that it makes it to the vehicle.
@@ -906,6 +894,10 @@ public:
     ///     @param rate Rate at which to send stream in Hz
     ///     @param sendMultiple Send multiple time to guarantee Vehicle reception
     void requestDataStream(MAV_DATA_STREAM stream, uint16_t rate, bool sendMultiple = true);
+
+    // The follow method are used to turn on/off the tracking of settings updates for firmware/vehicle type on offline vehicles.
+    void trackFirmwareVehicleTypeChanges(void);
+    void stopTrackingFirmwareVehicleTypeChanges(void);
 
     typedef enum {
         MessageNone,
@@ -1130,12 +1122,13 @@ public:
     void        setCheckListState       (CheckList cl)  { _checkListState = cl; emit checkListStateChanged(); }
 
 public slots:
-    void setVtolInFwdFlight             (bool vtolInFwdFlight);
+    void setVtolInFwdFlight                 (bool vtolInFwdFlight);
+    void _offlineFirmwareTypeSettingChanged (QVariant value);       // Should only be used by MissionControler to set firmware from Plan file
+    void _offlineVehicleTypeSettingChanged  (QVariant value);       // Should only be used by MissionController to set vehicle type from Plan file
 
 signals:
     void allLinksInactive               (Vehicle* vehicle);
     void coordinateChanged              (QGeoCoordinate coordinate);
-    void joystickModeChanged            (int mode);
     void joystickEnabledChanged         (bool enabled);
     void activeChanged                  (bool active);
     void mavlinkMessageReceived         (const mavlink_message_t& message);
@@ -1170,14 +1163,9 @@ signals:
     void linksPropertiesChanged         ();
     void textMessageReceived            (int uasid, int componentid, int severity, QString text);
     void checkListStateChanged          ();
-
     void messagesReceivedChanged        ();
     void messagesSentChanged            ();
     void messagesLostChanged            ();
-
-    /// Used internally to move sendMessage call to main thread
-    void _sendMessageOnLinkOnThread(LinkInterface* link, mavlink_message_t message);
-
     void messageTypeChanged             ();
     void newMessageCountChanged         ();
     void messageCountChanged            ();
@@ -1248,14 +1236,11 @@ signals:
 private slots:
     void _mavlinkMessageReceived        (LinkInterface* link, mavlink_message_t message);
     void _linkInactiveOrDeleted         (LinkInterface* link);
-    void _sendMessageOnLink             (LinkInterface* link, mavlink_message_t message);
     void _sendMessageMultipleNext       ();
     void _parametersReady               (bool parametersReady);
     void _remoteControlRSSIChanged      (uint8_t rssi);
     void _handleFlightModeChanged       (const QString& flightMode);
     void _announceArmedChanged          (bool armed);
-    void _offlineFirmwareTypeSettingChanged(QVariant value);
-    void _offlineVehicleTypeSettingChanged(QVariant value);
     void _offlineCruiseSpeedSettingChanged(QVariant value);
     void _offlineHoverSpeedSettingChanged(QVariant value);
     void _updateHighLatencyLink         (bool sendCommand = true);
@@ -1380,7 +1365,6 @@ private:
 
     QList<LinkInterface*> _links;
 
-    JoystickMode_t  _joystickMode;
     bool            _joystickEnabled;
 
     UAS* _uas;
@@ -1640,7 +1624,5 @@ private:
 
     // Settings keys
     static const char* _settingsGroup;
-    static const char* _joystickModeSettingsKey;
     static const char* _joystickEnabledSettingsKey;
-
 };

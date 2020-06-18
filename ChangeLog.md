@@ -4,6 +4,7 @@ Note: This file only contains high level features or important fixes.
 
 ## 4.1 - Daily build
 
+* Settings/Mavlink: Add ability to forward mavlink traffic out specified UDP port
 * Support mavlink terrain protocol which queries gcs for terrain height information. Allows planning missions with TERRAIN\_FRAME.
 * Fly: New instrument values display/editing support
 * Plan: Added new VTOL Landing Pattern support
@@ -13,9 +14,21 @@ Note: This file only contains high level features or important fixes.
 
 ## 4.0
 
-## 4.0.7 - Not yet released
+## 4.0.8 - Not yet released
+
+* Plan: Fix bugs associated with mission commands which specify and altitude but no lat/lon
+* Fix bug which could prevent view switching from working after altitude mode warning dialog would pop up
+
+## 4.0.8 - Stable
+
+* iOS: Modify QGC file storage location to support new Files app
+* Mobile: Fix Log Replay status bar file selection
+
+## 4.0.7 - Stable
 
 * Fix video page sizing
+* Virtual Joystick: Fix right stick centering. Fix/add support for rover/sub reverse throttle support.
+* Fix display of multiple ADSB vehicles
 
 ### 4.0.6 - Stable
 

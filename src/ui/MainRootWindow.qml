@@ -19,7 +19,6 @@ import QGroundControl.Controls      1.0
 import QGroundControl.ScreenTools   1.0
 import QGroundControl.FlightDisplay 1.0
 import QGroundControl.FlightMap     1.0
-import QGroundControl.Specific      1.0
 
 /// @brief Native QML top level window
 /// All properties defined here are visible to all QML pages.
@@ -38,11 +37,34 @@ ApplicationWindow {
             height  = ScreenTools.isMobile ? Screen.height : Math.min(150 * Screen.pixelDensity, Screen.height)
         }
 
-        // Startup experience wizard and provide the source using QGCCorePlugin
-        if (QGroundControl.settingsManager.appSettings.firstTimeStart.value) {
-            startupPopup.open()
-        } else {
-            showPreFlightChecklistIfNeeded()
+        // Start the sequence of first run prompt(s)
+        firstRunPromptManager.nextPrompt()
+    }
+
+    QtObject {
+        id: firstRunPromptManager
+
+        property var currentDialog:     null
+        property var rgPromptIds:       QGroundControl.corePlugin.firstRunPromptsToShow()
+        property int nextPromptIdIndex: 0
+
+        onRgPromptIdsChanged: console.log(QGroundControl.corePlugin, QGroundControl.corePlugin.firstRunPromptsToShow())
+
+        function clearNextPromptSignal() {
+            if (currentDialog) {
+                currentDialog.closed.disconnect(nextPrompt)
+            }
+        }
+
+        function nextPrompt() {
+            if (nextPromptIdIndex < rgPromptIds.length) {
+                currentDialog = showPopupDialogFromSource(QGroundControl.corePlugin.firstRunPromptResource(rgPromptIds[nextPromptIdIndex]))
+                currentDialog.closed.connect(nextPrompt)
+                nextPromptIdIndex++
+            } else {
+                currentDialog = null
+                showPreFlightChecklistIfNeeded()
+            }
         }
     }
 
@@ -55,8 +77,6 @@ ApplicationWindow {
 
     /// Current active Vehicle
     property var                activeVehicle:                  QGroundControl.multiVehicleManager.activeVehicle
-    /// Indicates communication with vehicle is list (no heartbeats)
-    property bool               communicationLost:              activeVehicle ? activeVehicle.connectionLost : false
     property string             formatedMessage:                activeVehicle ? activeVehicle.formatedMessage : ""
     /// Indicates usable height between toolbar and footer
     property real               availableHeight:                mainWindow.height - mainWindow.header.height - mainWindow.footer.height
@@ -103,47 +123,40 @@ ApplicationWindow {
         return _rgPreventViewSwitch[_rgPreventViewSwitch.length - 1]
     }
 
-    function viewSwitch(isPlanView, showModeIndicators) {
+    function viewSwitch(currentToolbar) {
         settingsWindow.visible  = false
         setupWindow.visible     = false
         analyzeWindow.visible   = false
         flightView.visible      = false
         planViewLoader.visible  = false
-        var indicatorSource
-        if (isPlanView) {
-            indicatorSource = "qrc:/qml/PlanToolBarIndicators.qml"
-        } else {
-            indicatorSource = "qrc:/toolbar/MainToolBarIndicators.qml"
-        }
-        toolbar.item.indicatorSource = indicatorSource
-        toolbar.item.showModeIndicators = showModeIndicators
+        toolbar.currentToolbar  = currentToolbar
     }
 
     function showFlyView() {
         if (!flightView.visible) {
             mainWindow.showPreFlightChecklistIfNeeded()
         }
-        viewSwitch(false, true)
+        viewSwitch(toolbar.flyViewToolbar)
         flightView.visible = true
     }
 
     function showPlanView() {
-        viewSwitch(true, false)
+        viewSwitch(toolbar.planViewToolbar)
         planViewLoader.visible = true
     }
 
     function showAnalyzeView() {
-        viewSwitch(false, false)
+        viewSwitch(toolbar.simpleToolbar)
         analyzeWindow.visible = true
     }
 
     function showSetupView() {
-        viewSwitch(false, false)
+        viewSwitch(toolbar.simpleToolbar)
         setupWindow.visible = true
     }
 
     function showSettingsView() {
-        viewSwitch(false, false)
+        viewSwitch(toolbar.simpleToolbar)
         settingsWindow.visible = true
     }
 
@@ -183,6 +196,10 @@ ApplicationWindow {
     readonly property int showDialogDefaultWidth:   40  ///< Use for default dialog width
 
     function showComponentDialog(component, title, charWidth, buttons) {
+        if (mainWindowDialog.visible) {
+            console.warn(("showComponentDialog called while dialog is already visible"))
+            return
+        }
         var dialogWidth = charWidth === showDialogFullWidth ? mainWindow.width : ScreenTools.defaultFontPixelWidth * charWidth
         mainWindowDialog.width = dialogWidth
         mainWindowDialog.dialogComponent = component
@@ -228,9 +245,18 @@ ApplicationWindow {
         }
     }
 
-    function showPopupDialog(component, properties) {
+    // Dialogs based on QGCPopupDialog
+
+    function showPopupDialogFromComponent(component, properties) {
         var dialog = popupDialogContainerComponent.createObject(mainWindow, { dialogComponent: component, dialogProperties: properties })
         dialog.open()
+        return dialog
+    }
+
+    function showPopupDialogFromSource(source, properties) {
+        var dialog = popupDialogContainerComponent.createObject(mainWindow, { dialogSource: source, dialogProperties: properties })
+        dialog.open()
+        return dialog
     }
 
     Component {
@@ -241,9 +267,12 @@ ApplicationWindow {
     property bool _forceClose: false
 
     function finishCloseProcess() {
+        _forceClose = true
+        // For some reason on the Qml side Qt doesn't automatically disconnect a signal when an object is destroyed.
+        // So we have to do it ourselves otherwise the signal flows through on app shutdown to an object which no longer exists.
+        firstRunPromptManager.clearNextPromptSignal()
         QGroundControl.linkManager.shutdown()
         QGroundControl.videoManager.stopVideo();
-        _forceClose = true
         mainWindow.close()
     }
 
@@ -320,29 +349,10 @@ ApplicationWindow {
 
     //-------------------------------------------------------------------------
     /// Toolbar
-    header: ToolBar {
-        height:         ScreenTools.toolbarHeight
-        visible:        !QGroundControl.videoManager.fullScreen
-        background: Rectangle {
-            color:      qgcPal.globalTheme === QGCPalette.Light ? QGroundControl.corePlugin.options.toolbarBackgroundLight : QGroundControl.corePlugin.options.toolbarBackgroundDark
-        }
-        Loader {
-            id:             toolbar
-            anchors.fill:   parent
-            source:         "qrc:/toolbar/MainToolBar.qml"
-            //-- Toggle Full Screen / Windowed
-            MouseArea {
-                anchors.fill:   parent
-                enabled:        !ScreenTools.isMobile
-                onDoubleClicked: {
-                    if(mainWindow.visibility === Window.Windowed) {
-                        mainWindow.showFullScreen()
-                    } else {
-                        mainWindow.showNormal()
-                    }
-                }
-            }
-        }
+    header: MainToolBar {
+        id:         toolbar
+        height:     ScreenTools.toolbarHeight
+        visible:    !QGroundControl.videoManager.fullScreen
     }
 
     footer: LogReplayStatusBar {
@@ -526,14 +536,6 @@ ApplicationWindow {
         }
     }
 
-    function showMissingParameterOverlay(missingParamName) {
-        showError(qsTr("Parameters missing: %1").arg(missingParamName))
-    }
-
-    function showFactError(errorMsg) {
-        showError(qsTr("Fact error: %1").arg(errorMsg))
-    }
-
     Popup {
         id:                 systemMessageArea
         y:                  ScreenTools.defaultFontPixelHeight
@@ -682,37 +684,6 @@ ApplicationWindow {
         onClosed: {
             loader.sourceComponent = null
             indicatorDropdown.currentIndicator = null
-        }
-    }
-
-    //-- Startup PopUp wizard
-    Popup {
-        id:                 startupPopup
-        anchors.centerIn:   parent
-        width:              Math.min(startupWizard.implicitWidth, mainWindow.width - 2 * startupPopup._horizontalSpacing)
-        height:             Math.min(startupWizard.implicitHeight, mainWindow.availableHeight - 2 * startupPopup._verticalSpacing)
-        modal:              true
-        focus:              true
-        closePolicy:        (startupWizard && startupWizard.forceKeepingOpen !== undefined && startupWizard.forceKeepingOpen) ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-        onClosed: mainWindow.showPreFlightChecklistIfNeeded()
-
-        property real _horizontalSpacing: ScreenTools.defaultFontPixelWidth * 5
-        property real _verticalSpacing: ScreenTools.defaultFontPixelHeight * 2
-
-        Connections {
-            target:         startupWizard
-            onCloseView:    startupPopup.close()
-        }
-
-        background: Rectangle {
-            radius: ScreenTools.defaultFontPixelHeight * 0.5
-            color:  qgcPal.window
-        }
-
-        StartupWizard {
-            id:             startupWizard
-            anchors.fill:   parent
         }
     }
 }

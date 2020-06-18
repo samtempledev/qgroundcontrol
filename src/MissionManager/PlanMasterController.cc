@@ -39,11 +39,7 @@ const char* PlanMasterController::kJsonRallyPointsObjectKey =   "rallyPoints";
 PlanMasterController::PlanMasterController(QObject* parent)
     : QObject               (parent)
     , _multiVehicleMgr      (qgcApp()->toolbox()->multiVehicleManager())
-    , _controllerVehicle    (new Vehicle(
-                                 static_cast<MAV_AUTOPILOT>(qgcApp()->toolbox()->settingsManager()->appSettings()->offlineEditingFirmwareType()->rawValue().toInt()),
-                                 static_cast<MAV_TYPE>(qgcApp()->toolbox()->settingsManager()->appSettings()->offlineEditingVehicleType()->rawValue().toInt()),
-                                 qgcApp()->toolbox()->firmwarePluginManager(),
-                                 this))
+    , _controllerVehicle    (new Vehicle(Vehicle::MAV_AUTOPILOT_TRACK, Vehicle::MAV_TYPE_TRACK, qgcApp()->toolbox()->firmwarePluginManager(), this))
     , _managerVehicle       (_controllerVehicle)
     , _missionController    (this)
     , _geoFenceController   (this)
@@ -68,9 +64,9 @@ PlanMasterController::PlanMasterController(MAV_AUTOPILOT firmwareType, MAV_TYPE 
 
 void PlanMasterController::_commonInit(void)
 {
-    connect(&_missionController,    &MissionController::dirtyChanged,       this, &PlanMasterController::dirtyChanged);
-    connect(&_geoFenceController,   &GeoFenceController::dirtyChanged,      this, &PlanMasterController::dirtyChanged);
-    connect(&_rallyPointController, &RallyPointController::dirtyChanged,    this, &PlanMasterController::dirtyChanged);
+    connect(&_missionController,    &MissionController::dirtyChanged,               this, &PlanMasterController::dirtyChanged);
+    connect(&_geoFenceController,   &GeoFenceController::dirtyChanged,              this, &PlanMasterController::dirtyChanged);
+    connect(&_rallyPointController, &RallyPointController::dirtyChanged,            this, &PlanMasterController::dirtyChanged);
 
     connect(&_missionController,    &MissionController::containsItemsChanged,       this, &PlanMasterController::containsItemsChanged);
     connect(&_geoFenceController,   &GeoFenceController::containsItemsChanged,      this, &PlanMasterController::containsItemsChanged);
@@ -81,11 +77,7 @@ void PlanMasterController::_commonInit(void)
     connect(&_rallyPointController, &RallyPointController::syncInProgressChanged,   this, &PlanMasterController::syncInProgressChanged);
 
     // Offline vehicle can change firmware/vehicle type
-    connect(_controllerVehicle, &Vehicle::capabilityBitsChanged,    this, &PlanMasterController::_updateSupportsTerrain);
-    connect(_controllerVehicle, &Vehicle::vehicleTypeChanged,       this, &PlanMasterController::_updateSupportsTerrain);
-    connect(_controllerVehicle, &Vehicle::vehicleTypeChanged,       this, &PlanMasterController::_updatePlanCreatorsList);
-
-    _updateSupportsTerrain();
+    connect(_controllerVehicle,     &Vehicle::vehicleTypeChanged,                   this, &PlanMasterController::_updatePlanCreatorsList);
 }
 
 
@@ -94,12 +86,11 @@ PlanMasterController::~PlanMasterController()
 
 }
 
-void PlanMasterController::start(bool flyView)
+void PlanMasterController::start(void)
 {
-    _flyView = flyView;
-    _missionController.start(_flyView);
-    _geoFenceController.start(_flyView);
-    _rallyPointController.start(_flyView);
+    _missionController.start    (_flyView);
+    _geoFenceController.start   (_flyView);
+    _rallyPointController.start (_flyView);
 
     _activeVehicleChanged(_multiVehicleMgr->activeVehicle());
     connect(_multiVehicleMgr, &MultiVehicleManager::activeVehicleChanged, this, &PlanMasterController::_activeVehicleChanged);
@@ -139,7 +130,6 @@ void PlanMasterController::_activeVehicleChanged(Vehicle* activeVehicle)
         disconnect(_managerVehicle->missionManager(),       nullptr, nullptr, nullptr);
         disconnect(_managerVehicle->geoFenceManager(),      nullptr, nullptr, nullptr);
         disconnect(_managerVehicle->rallyPointManager(),    nullptr, nullptr, nullptr);
-        disconnect(_managerVehicle,                         &Vehicle::capabilityBitsChanged, this, &PlanMasterController::_updateSupportsTerrain);
     }
 
     bool newOffline = false;
@@ -165,9 +155,6 @@ void PlanMasterController::_activeVehicleChanged(Vehicle* activeVehicle)
         connect(_managerVehicle->rallyPointManager(),   &RallyPointManager::sendComplete,           this, &PlanMasterController::_sendRallyPointsComplete);
     }
 
-    // Change in capabilities will affect terrain support
-    connect(_managerVehicle, &Vehicle::capabilityBitsChanged, this, &PlanMasterController::_updateSupportsTerrain);
-
     emit managerVehicleChanged(_managerVehicle);
 
     // Vehicle changed so we need to signal everything
@@ -176,7 +163,6 @@ void PlanMasterController::_activeVehicleChanged(Vehicle* activeVehicle)
     emit syncInProgressChanged();
     emit dirtyChanged(dirty());
     emit offlineChanged(offline());
-    _updateSupportsTerrain();
 
     if (!_flyView) {
         if (!offline()) {
@@ -403,7 +389,7 @@ void PlanMasterController::loadFromFile(const QString& filename)
     }
 
     if(success){
-        _currentPlanFile.sprintf("%s/%s.%s", fileInfo.path().toLocal8Bit().data(), fileInfo.completeBaseName().toLocal8Bit().data(), AppSettings::planFileExtension);
+        _currentPlanFile = QString::asprintf("%s/%s.%s", fileInfo.path().toLocal8Bit().data(), fileInfo.completeBaseName().toLocal8Bit().data(), AppSettings::planFileExtension);
     } else {
         _currentPlanFile.clear();
     }
@@ -633,14 +619,5 @@ void PlanMasterController::_updatePlanCreatorsList(void)
                 _planCreators->append(new StructureScanPlanCreator(this, this));
             }
         }
-    }
-}
-
-void PlanMasterController::_updateSupportsTerrain(void)
-{
-    bool supportsTerrain = _managerVehicle->capabilityBits() & MAV_PROTOCOL_CAPABILITY_TERRAIN;
-    if (supportsTerrain != _supportsTerrain) {
-        _supportsTerrain = supportsTerrain;
-        emit supportsTerrainChanged(supportsTerrain);
     }
 }

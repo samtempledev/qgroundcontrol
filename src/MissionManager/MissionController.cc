@@ -46,6 +46,7 @@ const char* MissionController::_jsonVehicleTypeKey =            "vehicleType";
 const char* MissionController::_jsonCruiseSpeedKey =            "cruiseSpeed";
 const char* MissionController::_jsonHoverSpeedKey =             "hoverSpeed";
 const char* MissionController::_jsonParamsKey =                 "params";
+const char* MissionController::_jsonGlobalPlanAltitudeModeKey = "globalPlanAltitudeMode";
 
 // Deprecated V1 format keys
 const char* MissionController::_jsonComplexItemsKey =           "complexItems";
@@ -65,11 +66,10 @@ MissionController::MissionController(PlanMasterController* masterController, QOb
     _resetMissionFlightStatus();
 
     _updateTimer.setSingleShot(true);
-    connect(&_updateTimer, &QTimer::timeout, this, &MissionController::_updateTimeout);
 
-    connect(_planViewSettings->takeoffItemNotRequired(), &Fact::rawValueChanged, this, &MissionController::_takeoffItemNotRequiredChanged);
-
-    connect(this, &MissionController::missionDistanceChanged,  this, &MissionController::recalcTerrainProfile);
+    connect(&_updateTimer,                                  &QTimer::timeout,                           this, &MissionController::_updateTimeout);
+    connect(_planViewSettings->takeoffItemNotRequired(),    &Fact::rawValueChanged,                     this, &MissionController::_takeoffItemNotRequiredChanged);
+    connect(this,                                           &MissionController::missionDistanceChanged, this, &MissionController::recalcTerrainProfile);
 
     // The follow is used to compress multiple recalc calls in a row to into a single call.
     connect(this, &MissionController::_recalcMissionFlightStatusSignal, this, &MissionController::_recalcMissionFlightStatus,   Qt::QueuedConnection);
@@ -345,6 +345,8 @@ VisualMissionItem* MissionController::_insertSimpleMissionItemWorker(QGeoCoordin
         setCurrentPlanViewSeqNum(newItem->sequenceNumber(), true);
     }
 
+    _firstItemAdded();
+
     return newItem;
 }
 
@@ -382,6 +384,8 @@ VisualMissionItem* MissionController::insertTakeoffItem(QGeoCoordinate /*coordin
     if (makeCurrentItem) {
         setCurrentPlanViewSeqNum(newItem->sequenceNumber(), true);
     }
+
+    _firstItemAdded();
 
     return newItem;
 }
@@ -520,6 +524,7 @@ void MissionController::_insertComplexMissionItemWorker(const QGeoCoordinate& ma
     if (makeCurrentItem) {
         setCurrentPlanViewSeqNum(complexItem->sequenceNumber(), true);
     }
+    _firstItemAdded();
 }
 
 void MissionController::removeVisualItem(int viIndex)
@@ -574,6 +579,10 @@ void MissionController::removeVisualItem(int viIndex)
     setCurrentPlanViewSeqNum(_visualItems->value<VisualMissionItem*>(newVIIndex)->sequenceNumber(), true);
 
     setDirty(true);
+
+    if (_visualItems->count() == 1) {
+        _allItemsRemoved();
+    }
 }
 
 void MissionController::removeAll(void)
@@ -588,6 +597,7 @@ void MissionController::removeAll(void)
         _initAllVisualItems();
         setDirty(true);
         _resetMissionFlightStatus();
+        _allItemsRemoved();
     }
 }
 
@@ -603,6 +613,8 @@ bool MissionController::_loadJsonMissionFileV1(const QJsonObject& json, QmlObjec
     if (!JsonHelper::validateKeys(json, rootKeyInfoList, errorString)) {
         return false;
     }
+
+    setGlobalAltitudeMode(QGroundControlQmlGlobal::AltitudeModeNone);   // Mixed mode
 
     // Read complex items
     QList<SurveyComplexItem*> surveyItems;
@@ -701,28 +713,46 @@ bool MissionController::_loadJsonMissionFileV2(const QJsonObject& json, QmlObjec
         { _jsonVehicleTypeKey,              QJsonValue::Double, false },
         { _jsonCruiseSpeedKey,              QJsonValue::Double, false },
         { _jsonHoverSpeedKey,               QJsonValue::Double, false },
+        { _jsonGlobalPlanAltitudeModeKey,   QJsonValue::Double, false },
     };
     if (!JsonHelper::validateKeys(json, rootKeyInfoList, errorString)) {
         return false;
     }
 
+    setGlobalAltitudeMode(QGroundControlQmlGlobal::AltitudeModeNone);   // Mixed mode
+
     qCDebug(MissionControllerLog) << "MissionController::_loadJsonMissionFileV2 itemCount:" << json[_jsonItemsKey].toArray().count();
 
-    // Mission Settings
     AppSettings* appSettings = qgcApp()->toolbox()->settingsManager()->appSettings();
 
+    // Get the firmware/vehicle type from the plan file
+    MAV_AUTOPILOT   planFileFirmwareType =  static_cast<MAV_AUTOPILOT>(json[_jsonFirmwareTypeKey].toInt());
+    MAV_TYPE        planFileVehicleType =   static_cast<MAV_TYPE>       (appSettings->offlineEditingVehicleType()->rawValue().toInt());
+    if (json.contains(_jsonVehicleTypeKey)) {
+        planFileVehicleType = static_cast<MAV_TYPE>(json[_jsonVehicleTypeKey].toInt());
+    }
+
+    // Update firmware/vehicle offline settings if we aren't connect to a vehicle
     if (_masterController->offline()) {
-        // We only update if offline since if we are online we use the online vehicle settings
         appSettings->offlineEditingFirmwareType()->setRawValue(AppSettings::offlineEditingFirmwareTypeFromFirmwareType(static_cast<MAV_AUTOPILOT>(json[_jsonFirmwareTypeKey].toInt())));
         if (json.contains(_jsonVehicleTypeKey)) {
             appSettings->offlineEditingVehicleType()->setRawValue(AppSettings::offlineEditingVehicleTypeFromVehicleType(static_cast<MAV_TYPE>(json[_jsonVehicleTypeKey].toInt())));
         }
     }
+
+    // The controller vehicle always tracks the Plan file firmware/vehicle types so update it
+    _controllerVehicle->stopTrackingFirmwareVehicleTypeChanges();
+    _controllerVehicle->_offlineFirmwareTypeSettingChanged(planFileFirmwareType);
+    _controllerVehicle->_offlineVehicleTypeSettingChanged(planFileVehicleType);
+
     if (json.contains(_jsonCruiseSpeedKey)) {
         appSettings->offlineEditingCruiseSpeed()->setRawValue(json[_jsonCruiseSpeedKey].toDouble());
     }
     if (json.contains(_jsonHoverSpeedKey)) {
         appSettings->offlineEditingHoverSpeed()->setRawValue(json[_jsonHoverSpeedKey].toDouble());
+    }
+    if (json.contains(_jsonGlobalPlanAltitudeModeKey)) {
+        setGlobalAltitudeMode(json[_jsonGlobalPlanAltitudeModeKey].toVariant().value<QGroundControlQmlGlobal::AltitudeMode>());
     }
 
     QGeoCoordinate homeCoordinate;
@@ -968,6 +998,12 @@ void MissionController::_initLoadedVisualItems(QmlObjectListModel* loadedVisualI
     MissionController::_scanForAdditionalSettings(_visualItems, _masterController);
 
     _initAllVisualItems();
+
+    if (_visualItems->count() > 1) {
+        _firstItemAdded();
+    } else {
+        _allItemsRemoved();
+    }
 }
 
 bool MissionController::load(const QJsonObject& json, QString& errorString)
@@ -1016,6 +1052,8 @@ bool MissionController::loadTextFile(QFile& file, QString& errorString)
     QByteArray  bytes = file.readAll();
     QTextStream stream(bytes);
 
+    setGlobalAltitudeMode(QGroundControlQmlGlobal::AltitudeModeNone);   // Mixed mode
+
     QmlObjectListModel* loadedVisualItems = new QmlObjectListModel(this);
     if (!_loadTextMissionFile(stream, loadedVisualItems, errorStr)) {
         errorString = errorMessage.arg(errorStr);
@@ -1052,11 +1090,12 @@ void MissionController::save(QJsonObject& json)
     }
     QJsonValue coordinateValue;
     JsonHelper::saveGeoCoordinate(settingsItem->coordinate(), true /* writeAltitude */, coordinateValue);
-    json[_jsonPlannedHomePositionKey]   = coordinateValue;
-    json[_jsonFirmwareTypeKey]          = _controllerVehicle->firmwareType();
-    json[_jsonVehicleTypeKey]           = _controllerVehicle->vehicleType();
-    json[_jsonCruiseSpeedKey]           = _controllerVehicle->defaultCruiseSpeed();
-    json[_jsonHoverSpeedKey]            = _controllerVehicle->defaultHoverSpeed();
+    json[_jsonPlannedHomePositionKey]       = coordinateValue;
+    json[_jsonFirmwareTypeKey]              = _controllerVehicle->firmwareType();
+    json[_jsonVehicleTypeKey]               = _controllerVehicle->vehicleType();
+    json[_jsonCruiseSpeedKey]               = _controllerVehicle->defaultCruiseSpeed();
+    json[_jsonHoverSpeedKey]                = _controllerVehicle->defaultHoverSpeed();
+    json[_jsonGlobalPlanAltitudeModeKey]    = _globalAltMode;
 
     // Save the visual items
 
@@ -1548,11 +1587,9 @@ void MissionController::_recalcMissionFlightStatus()
         // Update VTOL state
         if (simpleItem && _controllerVehicle->vtol()) {
             switch (simpleItem->command()) {
-            case MAV_CMD_NAV_TAKEOFF:
+            case MAV_CMD_NAV_TAKEOFF:       // This will do a fixed wing style takeoff
+            case MAV_CMD_NAV_VTOL_TAKEOFF:  // Vehicle goes straight up and then transitions to FW
                 vtolInHover = false;
-                break;
-            case MAV_CMD_NAV_VTOL_TAKEOFF:
-                vtolInHover = true;
                 break;
             case MAV_CMD_NAV_LAND:
                 vtolInHover = false;
@@ -2533,4 +2570,54 @@ QString MissionController::corridorScanComplexItemName(void) const
 QString MissionController::structureScanComplexItemName(void) const
 {
     return StructureScanComplexItem::name;
+}
+
+void MissionController::_allItemsRemoved(void)
+{
+    // When there are no mission items we track changes to firmware/vehicle type. This allows a vehicle connection
+    // to adjust these items.
+    _controllerVehicle->trackFirmwareVehicleTypeChanges();
+}
+
+void MissionController::_firstItemAdded(void)
+{
+    // As soon as the first item is added we lock the firmware/vehicle type to current values. So if you then connect a vehicle
+    // it will not affect these values.
+    _controllerVehicle->stopTrackingFirmwareVehicleTypeChanges();
+}
+
+MissionController::SendToVehiclePreCheckState MissionController::sendToVehiclePreCheck(void)
+{
+    if (_managerVehicle->isOfflineEditingVehicle()) {
+        return SendToVehiclePreCheckStateNoActiveVehicle;
+    }
+    if (_managerVehicle->armed() && _managerVehicle->flightMode() == _managerVehicle->missionFlightMode()) {
+        return SendToVehiclePreCheckStateActiveMission;
+    }
+    if (_controllerVehicle->firmwareType() != _managerVehicle->firmwareType() || _controllerVehicle->vehicleType() != _managerVehicle->vehicleType()) {
+        return SendToVehiclePreCheckStateFirwmareVehicleMismatch;
+    }
+    return SendToVehiclePreCheckStateOk;
+}
+
+QGroundControlQmlGlobal::AltitudeMode MissionController::globalAltitudeMode(void)
+{
+    return _globalAltMode;
+}
+
+QGroundControlQmlGlobal::AltitudeMode MissionController::globalAltitudeModeDefault(void)
+{
+    if (_globalAltMode == QGroundControlQmlGlobal::AltitudeModeNone) {
+        return QGroundControlQmlGlobal::AltitudeModeRelative;
+    } else {
+        return _globalAltMode;
+    }
+}
+
+void MissionController::setGlobalAltitudeMode(QGroundControlQmlGlobal::AltitudeMode altMode)
+{
+    if (_globalAltMode != altMode) {
+        _globalAltMode = altMode;
+        emit globalAltitudeModeChanged();
+    }
 }

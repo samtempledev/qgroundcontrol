@@ -221,7 +221,13 @@ bool QGroundControlQmlGlobal::linesIntersect(QPointF line1A, QPointF line1B, QPo
 {
     QPointF intersectPoint;
 
-    return QLineF(line1A, line1B).intersect(QLineF(line2A, line2B), &intersectPoint) == QLineF::BoundedIntersection &&
+#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
+    auto intersect = QLineF(line1A, line1B).intersect(QLineF(line2A, line2B), &intersectPoint);
+#else
+    auto intersect = QLineF(line1A, line1B).intersects(QLineF(line2A, line2B), &intersectPoint);
+#endif
+
+    return  intersect == QLineF::BoundedIntersection &&
             intersectPoint != line1A && intersectPoint != line1B;
 }
 
@@ -260,4 +266,43 @@ QString QGroundControlQmlGlobal::qgcVersion(void) const
     versionStr += QStringLiteral(" %1").arg(tr("64 bit"));
 #endif
     return versionStr;
+}
+
+QString QGroundControlQmlGlobal::altitudeModeExtraUnits(AltitudeMode altMode)
+{
+    switch (altMode) {
+    case AltitudeModeNone:
+        return QString();
+    case AltitudeModeRelative:
+        // Showing (Rel) all the time ends up being too noisy
+        return QString();
+    case AltitudeModeAbsolute:
+        return tr("(AMSL)");
+    case AltitudeModeAboveTerrain:
+        return tr("(Abv Terr)");
+    case AltitudeModeTerrainFrame:
+        return tr("(TerrF)");
+    }
+
+    // Should never get here but makes some compilers happy
+    return QString();
+}
+
+QString QGroundControlQmlGlobal::altitudeModeShortDescription(AltitudeMode altMode)
+{
+    switch (altMode) {
+    case AltitudeModeNone:
+        return QString();
+    case AltitudeModeRelative:
+        return tr("Relative To Launch");
+    case AltitudeModeAbsolute:
+        return tr("Above Mean Sea Level");
+    case AltitudeModeAboveTerrain:
+        return tr("Above Terrain");
+    case AltitudeModeTerrainFrame:
+        return tr("Terrain Frame");
+    }
+
+    // Should never get here but makes some compilers happy
+    return QString();
 }

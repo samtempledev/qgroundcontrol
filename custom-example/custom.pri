@@ -35,7 +35,7 @@ CONFIG  += QGC_DISABLE_PX4_PLUGIN_FACTORY
 DEFINES += CUSTOMHEADER=\"\\\"CustomPlugin.h\\\"\"
 DEFINES += CUSTOMCLASS=CustomPlugin
 
-TARGET   = MyGroundStation
+TARGET   = CustomQGroundControl
 DEFINES += QGC_APPLICATION_NAME='"\\\"Custom QGroundControl\\\""'
 
 DEFINES += QGC_ORG_NAME=\"\\\"qgroundcontrol.org\\\"\"
@@ -54,6 +54,14 @@ RESOURCES += \
 
 QML_IMPORT_PATH += \
    $$PWD/res
+
+LinuxBuild {
+
+    # Our QT_INSTALL_LIBS
+    QT_LIB_LIST += \
+        libQt5VirtualKeyboard.so.5 \
+
+}
 
 # Our own, custom sources
 SOURCES += \
